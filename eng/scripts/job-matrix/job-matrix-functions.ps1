@@ -9,6 +9,8 @@ class MatrixConfig {
     [Array]$exclude
 }
 
+IMPORT_MATRIX_KEYWORD = "$IMPORT"
+
 function CreateDisplayName([string]$parameter, [Hashtable]$displayNamesLookup)
 {
     $name = $parameter.ToString()
@@ -299,10 +301,26 @@ function InitializeMatrix
     }
 
     $head, $tail = $parameters
+    # This behavior implicitly treats non-array values as single elements
     foreach ($value in $head.value) {
         $newPermutation = CloneOrderedDictionary($permutation)
-        if ($head.Name
-        if ($value -is [PSCustomObject]) {
+        if ($head.Name -eq $IMPORT_MATRIX_KEYWORD) {
+            # Make a cross-product of all instances of an imported matrix with all current matrix parameters
+            $importedConfig = (Get-Content $head.value.path)
+            $importedMatrix = GenerateMatrix $importedConfig $head.value.selection
+            foreach ($importedLookup in $importedConfig.displayNamesLookup) {
+                if (-not $displayNamesLookup.Contains($importedLookup.Name)) {
+                    $displayNamesLookup[$importedLookup.Name] = $importedLookup.Value
+                }
+            }
+            foreach ($entry in $importedMatrix) {
+                $importedPermutation = CloneOrderedDictionary($newPermutation)
+                foreach ($parameter in $entry.parameters.GetEnumerator()) {
+                    $importedPermutation[$parameter.Name] = $parameter.Value
+                }
+                InitializeMatrix $tail $displayNamesLookup $permutations $importedPermutation
+            }
+        } elseif ($value -is [PSCustomObject]) {
             foreach ($nestedParameter in $value.PSObject.Properties) {
                 $nestedPermutation = CloneOrderedDictionary($newPermutation)
                 $nestedPermutation[$nestedParameter.Name] = $nestedParameter.Value

@@ -46,7 +46,6 @@ BeforeAll {
     ]
 }
 "@
-    $config = GetMatrixConfigFromJson $matrixConfig
 }
 
 Describe "Matrix-Lookup" -Tag "lookup" {
@@ -394,25 +393,31 @@ Describe "Platform Matrix Generation" -Tag "generate" {
 }
 
 Describe "Config File Object Conversion" -Tag "convert" {
+    BeforeEach {
+        $config = GetMatrixConfigFromJson $matrixConfig
+    }
+
     It "Should convert a matrix config" {
-        $converted = GetMatrixConfigFromJson $matrixConfig
+        $config.orderedMatrix | Should -BeOfType [System.Collections.Specialized.OrderedDictionary]
+        $config.orderedMatrix.operatingSystem[0] | Should -Be "windows-2019"
 
-        $converted.orderedMatrix | Should -BeOfType [System.Collections.Specialized.OrderedDictionary]
-        $converted.orderedMatrix.operatingSystem[0] | Should -Be "windows-2019"
+        $config.displayNamesLookup | Should -BeOfType [Hashtable]
+        $config.displayNamesLookup["--enableFoo"] | Should -Be "withFoo"
 
-        $converted.displayNamesLookup | Should -BeOfType [Hashtable]
-        $converted.displayNamesLookup["--enableFoo"] | Should -Be "withFoo"
-
-        $converted.include | ForEach-Object {
+        $config.include | ForEach-Object {
             $_ | Should -BeOfType [System.Collections.Specialized.OrderedDictionary]
         }
-        $converted.exclude | ForEach-Object {
+        $config.exclude | ForEach-Object {
             $_ | Should -BeOfType [System.Collections.Specialized.OrderedDictionary]
         }
     }
 }
 
 Describe "Platform Matrix Post Transformation" -Tag "transform" {
+    BeforeEach {
+        $config = GetMatrixConfigFromJson $matrixConfig
+    }
+
     It "Should match partial matrix elements" -TestCases @(
         @{ source = [Ordered]@{ a = 1; b = 2; }; target = [Ordered]@{ a = 1 }; expected = $true }
         @{ source = [Ordered]@{ a = 1; b = 2; }; target = [Ordered]@{ a = 1; b = 2 }; expected = $true }
@@ -421,29 +426,6 @@ Describe "Platform Matrix Post Transformation" -Tag "transform" {
         @{ source = [Ordered]@{ }; target = [Ordered]@{ a = 1; b = 2; }; expected = $false }
     ) {
         MatrixElementMatch $source $target | Should -Be $expected
-    }
-
-    It "Should convert singular elements" {
-        $ordered = [Ordered]@{}
-        $ordered.Add("a", 1)
-        $ordered.Add("b", 2)
-        $matrix = ConvertToMatrixArrayFormat $ordered
-        $matrix.a.Length | Should -Be 1
-        $matrix.b.Length | Should -Be 1
-
-        $ordered = [Ordered]@{}
-        $ordered.Add("a", 1)
-        $ordered.Add("b", @(1, 2))
-        $matrix = ConvertToMatrixArrayFormat $ordered
-        $matrix.a.Length | Should -Be 1
-        $matrix.b.Length | Should -Be 2
-
-        $ordered = [Ordered]@{}
-        $ordered.Add("a", @(1, 2))
-        $ordered.Add("b", @())
-        $matrix = ConvertToMatrixArrayFormat $ordered
-        $matrix.a.Length | Should -Be 2
-        $matrix.b.Length | Should -Be 0
     }
 
     It "Should remove matrix elements based on exclude filters" {
@@ -576,5 +558,33 @@ Describe "Platform Matrix Generation With Object Fields" -Tag "objectfields" {
         $matrix[4].parameters.testObjectValue1 | Should -Be "1"
         $matrix[4].parameters.testObjectValue2 | Should -Be "2"
         $matrix[4].parameters.Count | Should -Be 3
+    }
+}
+
+Describe "Platform Matrix Import" -Tag "import" {
+    BeforeEach {
+        $matrixConfigForObject = @'
+{
+    "matrix": {
+        "$IMPORT": {
+            "path": "./test-import-matrix.json",
+            "selection": "all"
+        },
+        "testField": [ "footest", "bartest" ]
+    },
+    "include": [
+      {
+        "testObjectInclude": {
+            "testObjectIncludeName": { "testObjectValue1": "1", "testObjectValue2": "2" }
+        },
+        "testField": "footest"
+      }
+    ]
+}
+'@
+        $importConfig = GetMatrixConfigFromJson $matrixConfigForObject
+    }
+
+    It("Should import an external matrix") {
     }
 }
