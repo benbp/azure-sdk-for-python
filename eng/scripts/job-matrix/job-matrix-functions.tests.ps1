@@ -570,14 +570,19 @@ Describe "Platform Matrix Import" -Tag "import" {
             "path": "./test-import-matrix.json",
             "selection": "all"
         },
-        "testField": [ "footest", "bartest" ]
+        "testField": [ "test1", "test2" ]
     },
     "include": [
       {
-        "testObjectInclude": {
-            "testObjectIncludeName": { "testObjectValue1": "1", "testObjectValue2": "2" }
-        },
-        "testField": "footest"
+        "testImportInclude": {
+            "testImportIncludeName": { "testValue1": "1", "testValue2": "2" }
+        }
+      }
+    ],
+    "exclude": [
+      {
+        "Foo": 1,
+        "Bar": [ "a", "b" ]
       }
     ]
 }
@@ -586,5 +591,7 @@ Describe "Platform Matrix Import" -Tag "import" {
     }
 
     It("Should import an external matrix") {
+        $matrix = GenerateMatrix $importConfig "all"
+        Write-Host (SerializePipelineMatrix $matrix).pretty
     }
 }

@@ -9,7 +9,7 @@ class MatrixConfig {
     [Array]$exclude
 }
 
-IMPORT_MATRIX_KEYWORD = "$IMPORT"
+$IMPORT_MATRIX_KEYWORD = '$IMPORT'
 
 function CreateDisplayName([string]$parameter, [Hashtable]$displayNamesLookup)
 {
