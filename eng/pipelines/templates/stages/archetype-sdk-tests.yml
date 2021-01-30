@@ -2,6 +2,12 @@ parameters:
   - name: ServiceDirectory
     type: string
     default: ''
+  - name: PreSteps
+    type: object
+    default: []
+  - name: PostSteps
+    type: object
+    default: []
   - name: EnvVars
     type: object
     default: {}
@@ -68,6 +74,12 @@ parameters:
         Path: eng/pipelines/templates/stages/platform-matrix.json
         Selection: sparse
         GenerateVMJobs: true
+  - name: PlatformPreSteps
+    type: object
+    default: []
+  - name: PlatformPostSteps
+    type: object
+    default: []
 
 variables:
   - template: ../variables/globals.yml
@@ -86,6 +98,12 @@ stages:
           parameters:
             AdditionalParameters:
               ServiceDirectory: ${{ parameters.ServiceDirectory }}
+              PreSteps:
+                - ${{ parameters.PlatformPreSteps }}
+                - ${{ parameters.PreSteps }}
+              PostSteps:
+                - ${{ parameters.PlatformPostSteps }}
+                - ${{ parameters.PostSteps }}
               EnvVars: ${{ parameters.EnvVars }}
               MaxParallel: ${{ parameters.MaxParallel }}
               BeforeTestSteps: ${{ parameters.BeforeTestSteps }}
