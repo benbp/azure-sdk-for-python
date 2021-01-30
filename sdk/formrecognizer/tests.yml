@@ -13,7 +13,7 @@ stages:
       ${{ if not(contains(variables['Build.DefinitionName'], 'prod')) }}:
         MatrixFilters:
           - '"macOS-10.15=^$"'
-          - '"PythonVersion=^pypy3"'
+          - '"PythonVersion=^(?!pypy3).*"'
       EnvVars:
         AZURE_FORM_RECOGNIZER_PYTHON_CANARY_API_KEY: $(python-formrecognizer-test-canary-api-key)
         AZURE_FORM_RECOGNIZER_PYTHON_API_KEY: $(python-formrecognizer-test-api-key)

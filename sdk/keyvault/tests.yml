@@ -12,19 +12,19 @@ stages:
         AZURE_CLIENT_SECRET: $(aad-azure-sdk-test-client-secret)
         AZURE_CLIENT_OID: $(aad-azure-sdk-test-client-oid)
       MatrixConfigs:
-        - Name: Keyvault_live_test
+        - Name: Keyvault_keys_live_test
           Path: eng/pipelines/templates/stages/platform-matrix.json
           Selection: sparse
           GenerateVMJobs: true
           Transform: |
             $_.parameters["BuildTargetingString"] = "azure-keyvault-keys"
-        - Name: Keyvault_live_test
+        - Name: Keyvault_secrets_live_test
           Path: eng/pipelines/templates/stages/platform-matrix.json
           Selection: sparse
           GenerateVMJobs: true
           Transform: |
             $_.parameters["BuildTargetingString"] = "azure-keyvault-secrets"
-        - Name: Keyvault_live_test
+        - Name: Keyvault_certificates_live_test
           Path: eng/pipelines/templates/stages/platform-matrix.json
           Selection: sparse
           Transform: |

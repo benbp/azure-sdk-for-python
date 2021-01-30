@@ -137,8 +137,7 @@ function ProcessExcludes([Array]$matrix, [Array]$excludes)
     $exclusionMatrix = @()
 
     foreach ($exclusion in $excludes) {
-        $converted = ConvertToMatrixArrayFormat $exclusion
-        $full = GenerateFullMatrix $converted
+        $full = GenerateFullMatrix $exclusion
         $exclusionMatrix += $full
     }
 
@@ -157,8 +156,7 @@ function ProcessExcludes([Array]$matrix, [Array]$excludes)
 function ProcessIncludes([Array]$matrix, [Array]$includes, [Hashtable]$displayNamesLookup)
 {
     foreach ($inclusion in $includes) {
-        $converted = ConvertToMatrixArrayFormat $inclusion
-        $full = GenerateFullMatrix $converted $displayNamesLookup
+        $full = GenerateFullMatrix $inclusion $displayNamesLookup
         $matrix += $full
     }
 
@@ -178,21 +176,6 @@ function MatrixElementMatch([System.Collections.Specialized.OrderedDictionary]$s
     }
 
     return $true
-}
-
-function ConvertToMatrixArrayFormat([System.Collections.Specialized.OrderedDictionary]$matrix)
-{
-    $converted = [Ordered]@{}
-
-    foreach ($key in $matrix.Keys) {
-        if ($matrix[$key] -isnot [Array]) {
-            $converted[$key] = ,$matrix[$key]
-        } else {
-            $converted[$key] = $matrix[$key]
-        }
-    }
-
-    return $converted
 }
 
 function CloneOrderedDictionary([System.Collections.Specialized.OrderedDictionary]$dictionary) {
@@ -318,6 +301,7 @@ function InitializeMatrix
     $head, $tail = $parameters
     foreach ($value in $head.value) {
         $newPermutation = CloneOrderedDictionary($permutation)
+        if ($head.Name
         if ($value -is [PSCustomObject]) {
             foreach ($nestedParameter in $value.PSObject.Properties) {
                 $nestedPermutation = CloneOrderedDictionary($newPermutation)
