@@ -7,6 +7,9 @@ parameters:
 - name: MatrixConfigs
   type: object
   default: []
+- name: MatrixFilters
+  type: object
+  default: []
 
 jobs:
 - job: generate_matrix
@@ -25,7 +28,7 @@ jobs:
               -ConfigPath ${{ config.Path }} `
               -Selection ${{ config.Selection }} `
               -DisplayNameFilter "$(displayNameFilter)" `
-              -Filters @("container=^$", "SupportedClouds=^$|${{ parameters.CloudConfig.Cloud }}")
+              -Filters ${{ join(",", parameters.MatrixFilters) }},"container=^$", "SupportedClouds=$^$|{{ parameters.CloudConfig.Cloud }}"
           name: generate_vm_job_matrix_${{ config.Name }}
           displayName: Generate VM Job Matrix
 
@@ -36,7 +39,7 @@ jobs:
               -ConfigPath ${{ config.Path }} `
               -Selection ${{ config.Selection }} `
               -DisplayNameFilter "$(displayNameFilter)" `
-              -Filters @("container=.*", "SupportedClouds=$^$|{{ parameters.CloudConfig.Cloud }}")
+              -Filters ${{ join(",", parameters.MatrixFilters) }},"container=.*", "SupportedClouds=$^$|{{ parameters.CloudConfig.Cloud }}"
           name: generate_container_job_matrix_${{ config.Name }}
           displayName: Generate Container Job Matrix
 

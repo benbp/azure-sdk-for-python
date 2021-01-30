@@ -74,6 +74,12 @@ parameters:
         Path: eng/pipelines/templates/stages/platform-matrix.json
         Selection: sparse
         GenerateVMJobs: true
+  - name: AdditionalMatrixConfigs
+    type: object
+    default: []
+  - Name: MatrixFilters
+    type: object
+    default: []
   - name: PlatformPreSteps
     type: object
     default: []
@@ -123,6 +129,7 @@ stages:
                 -  ${{ config }}
               - ${{ each config in parameters.AdditionalMatrixConfigs }}:
                 -  ${{ config }}
+            MatrixFilters: ${{ parameters.MatrixFilters }}
             CloudConfig:
               SubscriptionConfiguration: ${{ cloud.value.SubscriptionConfiguration }}
               Location: ${{ coalesce(parameters.Location, cloud.value.Location) }}
