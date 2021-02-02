@@ -187,7 +187,7 @@ function ProcessImport(
             }
             foreach($param in $importedEntry.parameters.GetEnumerator()) {
                 if (-not $newEntry.Contains($param.Name)) {
-                    $newEntry[$param.Name] = $param.Value
+                    $newEntry.parameters[$param.Name] = $param.Value
                 } else {
                     Write-Warning "Skipping duplicate parameter `"$($param.Name)`" from imported matrix."
                 }
