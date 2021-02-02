@@ -45,6 +45,7 @@ function GenerateMatrix(
     if ($config.include) {
         [Array]$matrix = ProcessIncludes $matrix $config.include $config.displayNamesLookup
     }
+    [Array]$matrix = ProcessImport $config.orderedMatrix $matrix
 
     [Array]$matrix = FilterMatrixDisplayName $matrix $displayNameFilter
     [Array]$matrix = FilterMatrix $matrix $filters
@@ -163,6 +164,46 @@ function ProcessIncludes([Array]$matrix, [Array]$includes, [Hashtable]$displayNa
     }
 
     return $matrix
+}
+
+function ProcessImport(
+    [System.Collections.Specialized.OrderedDictionary]$orderedMatrixConfig,
+    [Array]$matrix
+) {
+    if (-not $orderedMatrixConfig.Contains($IMPORT_MATRIX_KEYWORD)) {
+        return $matrix
+    }
+
+    $crossProductImported = @()
+    $importConfig = $orderedMatrixConfig[$IMPORT_MATRIX_KEYWORD]
+    $config = GetMatrixConfigFromJson (Get-Content $importConfig.path)
+    $importedMatrix = GenerateMatrix $config $importConfig.selection
+
+    foreach ($entry in $matrix) {
+        foreach ($importedEntry in $importedMatrix) {
+            $newEntry = @{
+                name = $entry.name
+                parameters = CloneOrderedDictionary($entry.parameters)
+            }
+            foreach($param in $importedEntry.parameters.GetEnumerator()) {
+                if (-not $newEntry.Contains($param.Name)) {
+                    $newEntry[$param.Name] = $param.Value
+                } else {
+                    Write-Warning "Skipping duplicate parameter `"$($param.Name)`" from imported matrix."
+                }
+            }
+
+            # The maximum allowed matrix name length is 100 characters
+            $newEntry.name = $newEntry.name, $importedEntry.name -join "_"
+            if ($newEntry.name.Length -gt 100) {
+                $newEntry.name = $newEntry.name[0..99] -join ""
+            }
+
+            $crossProductImported += $newEntry
+        }
+    }
+
+    return $crossProductImported
 }
 
 function MatrixElementMatch([System.Collections.Specialized.OrderedDictionary]$source, [System.Collections.Specialized.OrderedDictionary]$target)
@@ -304,23 +345,7 @@ function InitializeMatrix
     # This behavior implicitly treats non-array values as single elements
     foreach ($value in $head.value) {
         $newPermutation = CloneOrderedDictionary($permutation)
-        if ($head.Name -eq $IMPORT_MATRIX_KEYWORD) {
-            # Make a cross-product of all instances of an imported matrix with all current matrix parameters
-            $importedConfig = (Get-Content $head.value.path)
-            $importedMatrix = GenerateMatrix $importedConfig $head.value.selection
-            foreach ($importedLookup in $importedConfig.displayNamesLookup) {
-                if (-not $displayNamesLookup.Contains($importedLookup.Name)) {
-                    $displayNamesLookup[$importedLookup.Name] = $importedLookup.Value
-                }
-            }
-            foreach ($entry in $importedMatrix) {
-                $importedPermutation = CloneOrderedDictionary($newPermutation)
-                foreach ($parameter in $entry.parameters.GetEnumerator()) {
-                    $importedPermutation[$parameter.Name] = $parameter.Value
-                }
-                InitializeMatrix $tail $displayNamesLookup $permutations $importedPermutation
-            }
-        } elseif ($value -is [PSCustomObject]) {
+        if ($value -is [PSCustomObject]) {
             foreach ($nestedParameter in $value.PSObject.Properties) {
                 $nestedPermutation = CloneOrderedDictionary($newPermutation)
                 $nestedPermutation[$nestedParameter.Name] = $nestedParameter.Value
@@ -336,11 +361,15 @@ function InitializeMatrix
 function GetMatrixDimensions([System.Collections.Specialized.OrderedDictionary]$parameters)
 {
     $dimensions = @()
-    foreach ($val in $parameters.Values) {
-        if ($val -is [PSCustomObject]) {
-            $dimensions += ($val.PSObject.Properties | Measure-Object).Count
-        } elseif ($val -is [Array]) {
-            $dimensions += $val.Length
+    foreach ($param in $parameters.GetEnumerator()) {
+        if ($param.Value -is [PSCustomObject]) {
+            # Import gets processed after matrix generation
+            if ($param.Name -is $IMPORT_MATRIX_KEYWORD) {
+                continue
+            }
+            $dimensions += ($param.Value.PSObject.Properties | Measure-Object).Count
+        } elseif ($param.Value -is [Array]) {
+            $dimensions += $param.Value.Length
         } else {
             $dimensions += 1
         }

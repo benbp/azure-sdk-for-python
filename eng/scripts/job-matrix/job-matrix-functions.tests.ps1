@@ -563,14 +563,26 @@ Describe "Platform Matrix Generation With Object Fields" -Tag "objectfields" {
 
 Describe "Platform Matrix Import" -Tag "import" {
     BeforeEach {
+        $matrixConfigForObjectSimple = @'
+{
+    "matrix": {
+        "testField": [ "test1", "test2" ],
+        "$IMPORT": {
+            "path": "./test-import-matrix.json",
+            "selection": "sparse"
+        }
+    }
+}
+'@
+
         $matrixConfigForObject = @'
 {
     "matrix": {
+        "testField": [ "test1", "test2" ],
         "$IMPORT": {
             "path": "./test-import-matrix.json",
             "selection": "all"
-        },
-        "testField": [ "test1", "test2" ]
+        }
     },
     "include": [
       {
@@ -587,11 +599,44 @@ Describe "Platform Matrix Import" -Tag "import" {
     ]
 }
 '@
+
         $importConfig = GetMatrixConfigFromJson $matrixConfigForObject
+        $importConfigSimple = GetMatrixConfigFromJson $matrixConfigForObjectSimple
     }
 
-    It("Should import an external matrix") {
-        $matrix = GenerateMatrix $importConfig "all"
-        Write-Host (SerializePipelineMatrix $matrix).pretty
+    It("Should generate a full matrix with an imported a sparse matrix") {
+        $matrix = GenerateMatrix $importConfigSimple "all"
+        $matrix.Length | Should -Be 10
+
+        #$matrix[0].name | Should -Be test1_foo1_bar1
+        #$matrix[0].parameters.testField | Should -Be "test1"
+        #$matrix[0].parameters.Foo | Should -Be "foo1"
+        #$matrix[3].name | Should -Be test2_foo1_bar1
+        #$matrix[3].parameters.testField | Should -Be "test2"
+        #$matrix[3].parameters.Foo | Should -Be "foo1"
+        #$matrix[5].name | Should -Be test2_includedBaz
+        #$matrix[5].parameters.testField | Should -Be "test2"
+        #$matrix[5].parameters.Baz | Should -Be "includedBaz"
+    }
+
+    It("Should generate a sparse matrix with an imported a sparse matrix") {
+        $matrix = GenerateMatrix $importConfigSimple "sparse"
+        write-host ($matrix | convertto-json)
+        $matrix.Length | Should -Be 6
+
+        #$matrix[0].name | Should -Be test1_foo1_bar1
+        #$matrix[0].parameters.testField | Should -Be "test1"
+        #$matrix[0].parameters.Foo | Should -Be "foo1"
+        #$matrix[1].name | Should -Be test2_foo2_bar2
+        #$matrix[1].parameters.testField | Should -Be "test2"
+        #$matrix[1].parameters.Foo | Should -Be "foo2"
+        #$matrix[2].name | Should -Be test1_includedBaz
+        #$matrix[2].parameters.testField | Should -Be "test1"
+        #$matrix[2].parameters.Baz | Should -Be "includedBaz"
+    }
+
+    It("Should get matrix dimensions with an import") {
+        [Array]$dimensions = GetMatrixDimensions $importConfig.orderedMatrix
+        write-host ($dimensions | convertto-json)
     }
 }
