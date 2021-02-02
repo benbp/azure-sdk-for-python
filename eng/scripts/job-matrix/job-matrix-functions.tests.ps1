@@ -604,8 +604,9 @@ Describe "Platform Matrix Import" -Tag "import" {
         $importConfigSimple = GetMatrixConfigFromJson $matrixConfigForObjectSimple
     }
 
-    It("Should generate a full matrix with an imported a sparse matrix") {
+    It -tag bbp "Should generate a full matrix with an imported a sparse matrix" {
         $matrix = GenerateMatrix $importConfigSimple "all"
+        write-host ($matrix | convertto-json)
         $matrix.Length | Should -Be 10
 
         #$matrix[0].name | Should -Be test1_foo1_bar1
@@ -619,7 +620,7 @@ Describe "Platform Matrix Import" -Tag "import" {
         #$matrix[5].parameters.Baz | Should -Be "includedBaz"
     }
 
-    It("Should generate a sparse matrix with an imported a sparse matrix") {
+    It "Should generate a sparse matrix with an imported a sparse matrix" {
         $matrix = GenerateMatrix $importConfigSimple "sparse"
         write-host ($matrix | convertto-json)
         $matrix.Length | Should -Be 6
@@ -635,8 +636,8 @@ Describe "Platform Matrix Import" -Tag "import" {
         #$matrix[2].parameters.Baz | Should -Be "includedBaz"
     }
 
-    It("Should get matrix dimensions with an import") {
+    It "Should get matrix dimensions with an import" {
         [Array]$dimensions = GetMatrixDimensions $importConfig.orderedMatrix
-        write-host ($dimensions | convertto-json)
+        $dimensions | Should -Be @(2)
     }
 }

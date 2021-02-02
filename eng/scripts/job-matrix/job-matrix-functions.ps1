@@ -335,15 +335,21 @@ function InitializeMatrix
         $permutation = [Ordered]@{}
     )
 
-    if (-not $parameters) {
+    $head, $tail = $parameters
+
+    # Import gets processed after matrix generation
+    if ($head -and $head.Name -eq $IMPORT_MATRIX_KEYWORD) {
+        $head, $tail = $tail
+    }
+
+    if (-not $head) {
         $entry = CreateMatrixEntry $permutation $displayNamesLookup
         $permutations.Add($entry) | Out-Null
         return
     }
 
-    $head, $tail = $parameters
     # This behavior implicitly treats non-array values as single elements
-    foreach ($value in $head.value) {
+    foreach ($value in $head.Value) {
         $newPermutation = CloneOrderedDictionary($permutation)
         if ($value -is [PSCustomObject]) {
             foreach ($nestedParameter in $value.PSObject.Properties) {
@@ -364,7 +370,7 @@ function GetMatrixDimensions([System.Collections.Specialized.OrderedDictionary]$
     foreach ($param in $parameters.GetEnumerator()) {
         if ($param.Value -is [PSCustomObject]) {
             # Import gets processed after matrix generation
-            if ($param.Name -is $IMPORT_MATRIX_KEYWORD) {
+            if ($param.Name -eq $IMPORT_MATRIX_KEYWORD) {
                 continue
             }
             $dimensions += ($param.Value.PSObject.Properties | Measure-Object).Count
