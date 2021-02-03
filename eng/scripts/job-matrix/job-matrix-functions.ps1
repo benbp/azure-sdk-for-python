@@ -68,10 +68,12 @@ function ProcessAllOf([System.Collections.Specialized.OrderedDictionary]$paramet
     $processedParameters = [ordered]@{}
     $i = 0
     $allOfDimensions = @()
+    $startsAt = $null
     foreach ($param in $parameters.GetEnumerator()) {
         # If the selection is all, then the allOf field is redundant,
         # so copy its parameters to the top level
         if ($param.Name -eq $ALL_OF_KEYWORD) {
+            $startsAt = $i
             foreach ($allParam in $param.Value) {
                 $allOfDimensions += $i
                 $processedParameters[$allParam.Name] = $allParam.Value
@@ -84,7 +86,7 @@ function ProcessAllOf([System.Collections.Specialized.OrderedDictionary]$paramet
     }
 
     $parameters.Remove($ALL_OF_KEYWORD)
-    return $processedParameters, $allOfDimensions
+    return $processedParameters, $allOfDimensions, $startsAt
 }
 
 function FilterMatrixDisplayName([array]$matrix, [string]$filter) {
@@ -289,11 +291,23 @@ function GenerateSparseMatrix(
     [Hashtable]$displayNamesLookup
 ) {
     [Array]$dimensions = GetMatrixDimensions $parameters
-    $size = ($dimensions | Measure-Object -Maximum).Maximum
 
-    $parameters, $allOf = ProcessAllOf $parameters $true
+    $parameters, $allOfDimensions, $startsAt = ProcessAllOf $parameters $true
     [Array]$matrix = GenerateFullMatrix $parameters $displayNamesLookup
+
     $sparseMatrix = @()
+    $indexes = GetSparseMatrixIndexes $dimensions $allOfDimensions $startsAt
+    foreach ($idx in $indexes) {
+        $sparseMatrix += GetNdMatrixElement $idx $matrix $dimensions
+    }
+
+    return $sparseMatrix
+}
+
+function GetSparseMatrixIndexes([Array]$dimensions, [Array]$allOfDimensions, [Int]$startsAt)
+{
+    $size = ($dimensions | Measure-Object -Maximum).Maximum
+    $indexes = @()
 
     # With full matrix, retrieve items by doing diagonal lookups across the matrix N times.
     # For example, given a matrix with dimensions 3, 2, 2:
@@ -301,23 +315,41 @@ function GenerateSparseMatrix(
     # 1, 1, 1
     # 2, 2, 2
     # 3, 0, 0 <- 3, 3, 3 wraps to 3, 0, 0 given the dimensions
-    for ($i = 0; $i -lt $size; $i++) {
-        $idx = @()
-        for ($j = 0; $j -lt $dimensions.Length; $j++) {
-            $idx += $i % $dimensions[$j]
+    if (-not $allOfDimensions) {
+        for ($i = 0; $i -lt $size; $i++) {
+            $idx = @()
+            for ($j = 0; $j -lt $dimensions.Length; $j++) {
+                $idx += $i % $dimensions[$j]
+            }
+            $indexes += $idx
         }
-        $sparseMatrix += GetNdMatrixElement $idx $matrix $dimensions
+    } else {
+        $allOfPermutations = [System.Collections.ArrayList]::new()
+        GetPermutations $allOfDimensions $allOfPermutations
+        for ($i = 0; $i -lt $size; $i++) {
+            $idx = @()
+            for ($j = 0; $j -lt $startsAt; $j++) {
+                $idx += $i % $dimensions[$j]
+            }
+            $indexes += $idx
+        }
     }
 
-    if ($allOf) {
-
-    }
-
-    return $sparseMatrix
+    return $indexes
 }
 
-function GetSparseMatrixIndeces()
+function GetPermutations([Array]$numbers, [System.Collections.ArrayList]$permutations, $permutation = @())
 {
+    $head, $tail = $numbers
+    if (-not $head) {
+        $permutations.Add($permutation)
+    }
+
+    for ($i = 0; $i < $head; $i++) {
+        $newPermutation = $permutation
+        $newPermutation += $i
+        GetPermutations $tail $permutations $permutation
+    }
 }
 
 function GenerateFullMatrix(
