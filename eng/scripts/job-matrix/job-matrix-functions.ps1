@@ -3,13 +3,14 @@ Set-StrictMode -Version "4.0"
 class MatrixConfig {
     [PSCustomObject]$displayNames
     [Hashtable]$displayNamesLookup
+    [PSCustomObject]$import
     [PSCustomObject]$matrix
     [System.Collections.Specialized.OrderedDictionary]$orderedMatrix
     [Array]$include
     [Array]$exclude
 }
 
-$IMPORT_MATRIX_KEYWORD = '$IMPORT'
+$ALL_OF_KEYWORD = '$allOf'
 
 function CreateDisplayName([string]$parameter, [Hashtable]$displayNamesLookup)
 {
@@ -31,10 +32,15 @@ function GenerateMatrix(
     [string]$displayNameFilter = ".*",
     [array]$filters = @()
 ) {
+    $import = $null
+    if ($config.import -and ($config.import.combineWith -eq "matrix" -or $config.import.combineWith -eq "all") {
+        $import = $config.import
+    }
+
     if ($selectFromMatrixType -eq "sparse") {
-        [Array]$matrix = GenerateSparseMatrix $config.orderedMatrix $config.displayNamesLookup
+        [Array]$matrix = GenerateSparseMatrix $config.orderedMatrix $config.displayNamesLookup $import
     } elseif ($selectFromMatrixType -eq "all") {
-        [Array]$matrix = GenerateFullMatrix $config.orderedMatrix $config.displayNamesLookup
+        [Array]$matrix = GenerateFullMatrix $config.orderedMatrix $config.displayNamesLookup $import
     } else {
         throw "Matrix generator not implemented for selectFromMatrixType: $($platform.selectFromMatrixType)"
     }
@@ -43,9 +49,8 @@ function GenerateMatrix(
         [Array]$matrix = ProcessExcludes $matrix $config.exclude
     }
     if ($config.include) {
-        [Array]$matrix = ProcessIncludes $matrix $config.include $config.displayNamesLookup
+        [Array]$matrix = ProcessIncludes $config $matrix
     }
-    [Array]$matrix = ProcessImport $config.orderedMatrix $matrix
 
     [Array]$matrix = FilterMatrixDisplayName $matrix $displayNameFilter
     [Array]$matrix = FilterMatrix $matrix $filters
@@ -116,6 +121,9 @@ function GetMatrixConfigFromJson($jsonConfig)
             $config.displayNamesLookup.Add($_.Name, $_.Value)
         }
     }
+    if ($null -ne $config.import) {
+        $config.import.selection = $config.selection
+    }
     $config.include = $config.include | Where-Object { $null -ne $_ } | ForEach-Object {
         $ordered = [ordered]@{}
         $_.PSObject.Properties | ForEach-Object {
@@ -156,28 +164,31 @@ function ProcessExcludes([Array]$matrix, [Array]$excludes)
     return $matrix | Where-Object { !$_.parameters.Contains($deleteKey) }
 }
 
-function ProcessIncludes([Array]$matrix, [Array]$includes, [Hashtable]$displayNamesLookup)
+function ProcessIncludes([MatrixConfig]$config, [Array]$matrix) {
 {
-    foreach ($inclusion in $includes) {
-        $full = GenerateFullMatrix $inclusion $displayNamesLookup
-        $matrix += $full
+    $inclusionMatrix = @()
+    foreach ($inclusion in $config.include) {
+        $full = GenerateFullMatrix $inclusion $config.displayNamesLookup
+        $inclusionMatrix += $full
     }
+    if ($config.import -and ($config.import.combineWith -eq "include" -or $config.import.combineWith -eq "all") {
+        $inclusionMatrix += ProcessImport $config $inclusionMatrix
+    }
+
+    $matrix += $inclusionMatrix
 
     return $matrix
 }
 
-function ProcessImport(
-    [System.Collections.Specialized.OrderedDictionary]$orderedMatrixConfig,
-    [Array]$matrix
-) {
-    if (-not $orderedMatrixConfig.Contains($IMPORT_MATRIX_KEYWORD)) {
+function ProcessImport([PSCustomObject]$import, [Array]$matrix)
+{
+    if (-not $import) {
         return $matrix
     }
 
     $crossProductImported = @()
-    $importConfig = $orderedMatrixConfig[$IMPORT_MATRIX_KEYWORD]
-    $config = GetMatrixConfigFromJson (Get-Content $importConfig.path)
-    $importedMatrix = GenerateMatrix $config $importConfig.selection
+    $matrixConfig = GetMatrixConfigFromJson (Get-Content $import.path)
+    $importedMatrix = GenerateMatrix $matrixConfig $import.selection
 
     foreach ($entry in $matrix) {
         foreach ($importedEntry in $importedMatrix) {
@@ -245,16 +256,30 @@ function SerializePipelineMatrix([Array]$matrix)
     }
 }
 
-function GenerateSparseMatrix([System.Collections.Specialized.OrderedDictionary]$parameters, [Hashtable]$displayNamesLookup)
-{
+function GenerateSparseMatrix(
+    [System.Collections.Specialized.OrderedDictionary]$parameters,
+    [Hashtable]$displayNamesLookup,
+    [PSCustomObject]$import = $null
+) {
     [Array]$dimensions = GetMatrixDimensions $parameters
     $size = ($dimensions | Measure-Object -Maximum).Maximum
 
-    [Array]$matrix = GenerateFullMatrix $parameters $displayNamesLookup
+    $processedParameters = @()
+    foreach ($param in $parameters.GetEnumerator()) {
+        if ($param.Name -ne $ALL_OF_KEYWORD) {
+            foreach ($allParam in $param.GetEnumerator()) {
+                $parameterArray += $param
+            }
+        } else {
+            $parameterArray += $param
+        }
+    }
+
+    [Array]$matrix = GenerateFullMatrix $processedParameters $displayNamesLookup
     $sparseMatrix = @()
 
     # With full matrix, retrieve items by doing diagonal lookups across the matrix N times.
-    # For example, given a matrix with dimensions 3, 2, 2:
+    # For example, given a matrix with dimensions 4, 3, 3:
     # 0, 0, 0
     # 1, 1, 1
     # 2, 2, 2
@@ -267,22 +292,37 @@ function GenerateSparseMatrix([System.Collections.Specialized.OrderedDictionary]
         $sparseMatrix += GetNdMatrixElement $idx $matrix $dimensions
     }
 
+    # If there is a matrix import, then it should be combined with all permutations of the top level sparse matrix
+    $sparseMatrix = ProcessImport $import $sparseMatrix
     return $sparseMatrix
 }
 
-function GenerateFullMatrix([System.Collections.Specialized.OrderedDictionary] $parameters, [Hashtable]$displayNamesLookup = @{})
-{
+function GenerateFullMatrix(
+    [System.Collections.Specialized.OrderedDictionary] $parameters,
+    [Hashtable]$displayNamesLookup = @{},
+    [PSCustomObject]$import = $null
+) {
     # Handle when the config does not have a matrix specified (e.g. only the include field is specified)
     if ($parameters.Count -eq 0) {
         return @()
     }
 
-    $parameterArray = $parameters.GetEnumerator() | ForEach-Object { $_ }
+    $parameterArray = @()
+    foreach ($param in $parameters.GetEnumerator()) {
+        if ($param.Name -eq $ALL_OF_KEYWORD) {
+            foreach ($allParam in $param.GetEnumerator()) {
+                $parameterArray += $param
+            }
+        } else {
+            $parameterArray += $param
+        }
+    }
 
     $matrix = [System.Collections.ArrayList]::new()
     InitializeMatrix $parameterArray $displayNamesLookup $matrix
 
-    return $matrix.ToArray()
+    $matrix = ProcessImport $import $matrix.ToArray()
+    return $matrix
 }
 
 function CreateMatrixEntry([System.Collections.Specialized.OrderedDictionary]$permutation, [Hashtable]$displayNamesLookup = @{})
@@ -334,13 +374,7 @@ function InitializeMatrix
         [System.Collections.ArrayList]$permutations,
         $permutation = [Ordered]@{}
     )
-
     $head, $tail = $parameters
-
-    # Import gets processed after matrix generation
-    if ($head -and $head.Name -eq $IMPORT_MATRIX_KEYWORD) {
-        $head, $tail = $tail
-    }
 
     if (-not $head) {
         $entry = CreateMatrixEntry $permutation $displayNamesLookup
@@ -369,10 +403,6 @@ function GetMatrixDimensions([System.Collections.Specialized.OrderedDictionary]$
     $dimensions = @()
     foreach ($param in $parameters.GetEnumerator()) {
         if ($param.Value -is [PSCustomObject]) {
-            # Import gets processed after matrix generation
-            if ($param.Name -eq $IMPORT_MATRIX_KEYWORD) {
-                continue
-            }
             $dimensions += ($param.Value.PSObject.Properties | Measure-Object).Count
         } elseif ($param.Value -is [Array]) {
             $dimensions += $param.Value.Length

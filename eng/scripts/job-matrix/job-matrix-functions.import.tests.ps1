@@ -5,40 +5,12 @@ BeforeAll {
 }
 
 Describe "Platform Matrix Import" -Tag "import" {
-    BeforeEach {
-        $matrixConfigForObject = @'
-{
-    "matrix": {
-        "testField": [ "test1", "test2" ],
-        "$IMPORT": {
-            "path": "./test-import-matrix.json",
-            "selection": "all"
-        }
-    },
-    "include": [
-      {
-        "testImportInclude": {
-            "testImportIncludeName": { "testValue1": "1", "testValue2": "2" }
-        }
-      }
-    ],
-    "exclude": [
-      {
-        "Foo": 1,
-        "Bar": [ "a", "b" ]
-      }
-    ]
-}
-'@
-
-        $importConfig = GetMatrixConfigFromJson $matrixConfigForObject
-    }
-
-    It "Should generate a full matrix with an imported sparse matrix" {
+    It "Should get matrix dimensions with an import" {
         $matrixJson = @'
 {
     "matrix": {
-        "testField": [ "test1", "test2" ],
+        "testField1": [ 1, 2 ],
+        "testField2": [ 1, 2, 3 ],
         "$IMPORT": {
             "path": "./test-import-matrix.json",
             "selection": "sparse"
@@ -47,7 +19,26 @@ Describe "Platform Matrix Import" -Tag "import" {
 }
 '@
         $importConfig = GetMatrixConfigFromJson $matrixJson
-        $matrix = GenerateMatrix $importConfig "all"
+        [Array]$dimensions = GetMatrixDimensions $importConfig.orderedMatrix
+        $dimensions | Should -Be @(2, 3)
+    }
+
+    It "Should generate a full matrix with an imported sparse matrix" {
+        $matrixJson = @'
+{
+    "import": {
+        "path": "./test-import-matrix.json",
+        "combineWith": "matrix"
+    },
+    "matrix": {
+        "$allOf": {
+            "testField": [ "test1", "test2" ]
+        }
+    }
+}
+'@
+        $importConfig = GetMatrixConfigFromJson $matrixJson
+        $matrix = GenerateMatrix $importConfig "sparse"
 
         $matrix.Length | Should -Be 6
 
@@ -65,13 +56,13 @@ Describe "Platform Matrix Import" -Tag "import" {
     It "Should generate a sparse matrix with an imported a sparse matrix" {
         $matrixJson = @'
 {
+    "import": {
+        "path": "./test-import-matrix.json",
+        "combineWith": "matrix"
+    },
     "matrix": {
         "testField1": [ "test11", "test12" ],
-        "testField2": [ "test21", "test22" ],
-        "$IMPORT": {
-            "path": "./test-import-matrix.json",
-            "selection": "sparse"
-        }
+        "testField2": [ "test21", "test22" ]
     }
 }
 '@
@@ -94,8 +85,32 @@ Describe "Platform Matrix Import" -Tag "import" {
         $matrix[4].parameters.Foo | Should -Be "foo2"
     }
 
-    It "Should get matrix dimensions with an import" {
-        [Array]$dimensions = GetMatrixDimensions $importConfig.orderedMatrix
-        $dimensions | Should -Be @(2)
+    It "Should " {
+        $matrixConfigForObject = @'
+{
+    "import": {
+        "path": "./test-import-matrix.json",
+        "combineWith": "all"
+    },
+    "matrix": {
+        "testField": [ "test1", "test2" ],
+    },
+    "include": [
+      {
+        "testImportInclude": {
+            "testImportIncludeName": { "testValue1": "1", "testValue2": "2" }
+        }
+      }
+    ],
+    "exclude": [
+      {
+        "Foo": 1,
+        "Bar": [ "a", "b" ]
+      }
+    ]
+}
+'@
+
+        $importConfig = GetMatrixConfigFromJson $matrixConfigForObject
     }
 }
