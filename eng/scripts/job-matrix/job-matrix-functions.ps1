@@ -32,17 +32,18 @@ function GenerateMatrix(
     [string]$displayNameFilter = ".*",
     [array]$filters = @()
 ) {
-    $import = $null
-    if ($config.import -and ($config.import.combineWith -eq "matrix" -or $config.import.combineWith -eq "all") {
-        $import = $config.import
-    }
-
     if ($selectFromMatrixType -eq "sparse") {
-        [Array]$matrix = GenerateSparseMatrix $config.orderedMatrix $config.displayNamesLookup $import
+        [Array]$matrix = GenerateSparseMatrix $processedMatrix $config.displayNamesLookup
     } elseif ($selectFromMatrixType -eq "all") {
-        [Array]$matrix = GenerateFullMatrix $config.orderedMatrix $config.displayNamesLookup $import
+        [Array]$matrix = GenerateFullMatrix $processedMatrix $config.displayNamesLookup
     } else {
         throw "Matrix generator not implemented for selectFromMatrixType: $($platform.selectFromMatrixType)"
+    }
+
+    # Process import after matrix generation, since a sparse selection should result in a full combination of the
+    # top level and imported sparse matrices (as opposed to a sparse selection of both matrices).
+    if ($config.import -and ($config.import.combineWith -eq "matrix" -or $config.import.combineWith -eq "all") {
+        $matrix = ProcessImport $config $matrix
     }
 
     if ($config.exclude) {
@@ -55,6 +56,35 @@ function GenerateMatrix(
     [Array]$matrix = FilterMatrixDisplayName $matrix $displayNameFilter
     [Array]$matrix = FilterMatrix $matrix $filters
     return $matrix
+}
+
+function ProcessAllOf([System.Collections.Specialized.OrderedDictionary]$parameters, [Boolean]$sparse)
+{
+    if (-not $parameters.Contains($ALL_OF_KEYWORD) {
+        return $parameters, $null
+    }
+
+    # Iterate instead of doing a key lookup in order to preserve ordering
+    $processedParameters = [ordered]@{}
+    $i = 0
+    $allOfDimensions = @()
+    foreach ($param in $parameters.GetEnumerator()) {
+        # If the selection is all, then the allOf field is redundant,
+        # so copy its parameters to the top level
+        if ($param.Name -eq $ALL_OF_KEYWORD) {
+            foreach ($allParam in $param.Value) {
+                $allOfDimensions += $i
+                $processedParameters[$allParam.Name] = $allParam.Value
+                $i++
+            }
+        } else {
+            $processedParameters[$param.Name] = $param.Value
+        }
+        $i++
+    }
+
+    $parameters.Remove($ALL_OF_KEYWORD)
+    return $processedParameters, $allOfDimensions
 }
 
 function FilterMatrixDisplayName([array]$matrix, [string]$filter) {
@@ -172,12 +202,10 @@ function ProcessIncludes([MatrixConfig]$config, [Array]$matrix) {
         $inclusionMatrix += $full
     }
     if ($config.import -and ($config.import.combineWith -eq "include" -or $config.import.combineWith -eq "all") {
-        $inclusionMatrix += ProcessImport $config $inclusionMatrix
+        $inclusionMatrix = ProcessImport $config $inclusionMatrix
     }
 
-    $matrix += $inclusionMatrix
-
-    return $matrix
+    return $matrix + $inclusionMatrix
 }
 
 function ProcessImport([PSCustomObject]$import, [Array]$matrix)
@@ -258,28 +286,17 @@ function SerializePipelineMatrix([Array]$matrix)
 
 function GenerateSparseMatrix(
     [System.Collections.Specialized.OrderedDictionary]$parameters,
-    [Hashtable]$displayNamesLookup,
-    [PSCustomObject]$import = $null
+    [Hashtable]$displayNamesLookup
 ) {
     [Array]$dimensions = GetMatrixDimensions $parameters
     $size = ($dimensions | Measure-Object -Maximum).Maximum
 
-    $processedParameters = @()
-    foreach ($param in $parameters.GetEnumerator()) {
-        if ($param.Name -ne $ALL_OF_KEYWORD) {
-            foreach ($allParam in $param.GetEnumerator()) {
-                $parameterArray += $param
-            }
-        } else {
-            $parameterArray += $param
-        }
-    }
-
-    [Array]$matrix = GenerateFullMatrix $processedParameters $displayNamesLookup
+    $parameters, $allOf = ProcessAllOf $parameters $true
+    [Array]$matrix = GenerateFullMatrix $parameters $displayNamesLookup
     $sparseMatrix = @()
 
     # With full matrix, retrieve items by doing diagonal lookups across the matrix N times.
-    # For example, given a matrix with dimensions 4, 3, 3:
+    # For example, given a matrix with dimensions 3, 2, 2:
     # 0, 0, 0
     # 1, 1, 1
     # 2, 2, 2
@@ -292,36 +309,32 @@ function GenerateSparseMatrix(
         $sparseMatrix += GetNdMatrixElement $idx $matrix $dimensions
     }
 
-    # If there is a matrix import, then it should be combined with all permutations of the top level sparse matrix
-    $sparseMatrix = ProcessImport $import $sparseMatrix
+    if ($allOf) {
+
+    }
+
     return $sparseMatrix
+}
+
+function GetSparseMatrixIndeces()
+{
 }
 
 function GenerateFullMatrix(
     [System.Collections.Specialized.OrderedDictionary] $parameters,
-    [Hashtable]$displayNamesLookup = @{},
-    [PSCustomObject]$import = $null
+    [Hashtable]$displayNamesLookup = @{}
 ) {
     # Handle when the config does not have a matrix specified (e.g. only the include field is specified)
     if ($parameters.Count -eq 0) {
         return @()
     }
 
-    $parameterArray = @()
-    foreach ($param in $parameters.GetEnumerator()) {
-        if ($param.Name -eq $ALL_OF_KEYWORD) {
-            foreach ($allParam in $param.GetEnumerator()) {
-                $parameterArray += $param
-            }
-        } else {
-            $parameterArray += $param
-        }
-    }
+    $parameters, $_ = ProcessAllOf $parameters $false
+    $parameterArray = $parameters.GetEnumerator() | ForEach-Object { $_ }
 
     $matrix = [System.Collections.ArrayList]::new()
     InitializeMatrix $parameterArray $displayNamesLookup $matrix
 
-    $matrix = ProcessImport $import $matrix.ToArray()
     return $matrix
 }
 
