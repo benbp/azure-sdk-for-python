@@ -3,11 +3,14 @@ Set-StrictMode -Version "4.0"
 class MatrixConfig {
     [PSCustomObject]$displayNames
     [Hashtable]$displayNamesLookup
+    [PSCustomObject]$import
     [PSCustomObject]$matrix
     [System.Collections.Specialized.OrderedDictionary]$orderedMatrix
     [Array]$include
     [Array]$exclude
 }
+
+$ALL_OF_KEYWORD = '$allOf'
 
 function CreateDisplayName([string]$parameter, [Hashtable]$displayNamesLookup)
 {
@@ -37,16 +40,44 @@ function GenerateMatrix(
         throw "Matrix generator not implemented for selectFromMatrixType: $($platform.selectFromMatrixType)"
     }
 
+    # Process import after matrix generation, since a sparse selection should result in a full combination of the
+    # top level and imported sparse matrices (as opposed to a sparse selection of both matrices).
+    if ($config.import -and ($config.import.combineWith -eq "matrix" -or $config.import.combineWith -eq "all")) {
+        $matrix = ProcessImport $config.import $matrix $selectFromMatrixType
+    }
+
     if ($config.exclude) {
         [Array]$matrix = ProcessExcludes $matrix $config.exclude
     }
     if ($config.include) {
-        [Array]$matrix = ProcessIncludes $matrix $config.include $config.displayNamesLookup
+        [Array]$matrix = ProcessIncludes $config $matrix $selectFromMatrixType
     }
 
     [Array]$matrix = FilterMatrixDisplayName $matrix $displayNameFilter
     [Array]$matrix = FilterMatrix $matrix $filters
     return $matrix
+}
+
+function ProcessAllOf([System.Collections.Specialized.OrderedDictionary]$parameters, [Boolean]$sparse)
+{
+    $parameters = CloneOrderedDictionary $parameters
+    if (-not $parameters.Contains($ALL_OF_KEYWORD)) {
+        return $parameters, $null
+    }
+
+    $allOf = [ordered]@{}
+    foreach ($param in $parameters[$ALL_OF_KEYWORD].PSObject.Properties) {
+        if (-not $sparse) {
+            # If the selection is all, then the allOf field is redundant,
+            # so copy its parameters to the top level
+            $parameters[$param.Name] = $param.Value
+        }
+        $allOf.Add($param.Name, $param.Value)
+    }
+
+    $parameters.Remove($ALL_OF_KEYWORD)
+
+    return $parameters, $allOf
 }
 
 function FilterMatrixDisplayName([array]$matrix, [string]$filter) {
@@ -97,7 +128,7 @@ function ParseFilter([string]$filter) {
 
 # Importing the JSON as PSCustomObject preserves key ordering,
 # whereas ConvertFrom-Json -AsHashtable does not
-function GetMatrixConfigFromJson($jsonConfig)
+function GetMatrixConfigFromJson([String]$jsonConfig)
 {
     [MatrixConfig]$config = $jsonConfig | ConvertFrom-Json
     $config.orderedMatrix = [ordered]@{}
@@ -137,8 +168,7 @@ function ProcessExcludes([Array]$matrix, [Array]$excludes)
     $exclusionMatrix = @()
 
     foreach ($exclusion in $excludes) {
-        $converted = ConvertToMatrixArrayFormat $exclusion
-        $full = GenerateFullMatrix $converted
+        $full = GenerateFullMatrix $exclusion
         $exclusionMatrix += $full
     }
 
@@ -154,15 +184,68 @@ function ProcessExcludes([Array]$matrix, [Array]$excludes)
     return $matrix | Where-Object { !$_.parameters.Contains($deleteKey) }
 }
 
-function ProcessIncludes([Array]$matrix, [Array]$includes, [Hashtable]$displayNamesLookup)
+function ProcessIncludes([MatrixConfig]$config, [Array]$matrix, [String]$importSelection)
 {
-    foreach ($inclusion in $includes) {
-        $converted = ConvertToMatrixArrayFormat $inclusion
-        $full = GenerateFullMatrix $converted $displayNamesLookup
-        $matrix += $full
+    $inclusionMatrix = @()
+    foreach ($inclusion in $config.include) {
+        $full = GenerateFullMatrix $inclusion $config.displayNamesLookup
+        $inclusionMatrix += $full
+    }
+    if ($config.import -and ($config.import.combineWith -eq "include" -or $config.import.combineWith -eq "all")) {
+        $inclusionMatrix = ProcessImport $config.import $inclusionMatrix $importSelection
     }
 
-    return $matrix
+    return $matrix + $inclusionMatrix
+}
+
+function ProcessImport([PSCustomObject]$import, [Array]$matrix, [String]$selection)
+{
+    if (-not $import) {
+        return $matrix
+    }
+
+    $matrixConfig = GetMatrixConfigFromJson (Get-Content $import.path)
+    $importedMatrix = GenerateMatrix $matrixConfig $selection
+
+    return CombineMatrices $matrix $importedMatrix
+}
+
+function CombineMatrices([Array]$matrix1, [Array]$matrix2)
+{
+    $combined = @()
+    if (-not $matrix1) {
+        return $matrix2
+    }
+    if (-not $matrix2) {
+        return $matrix1
+    }
+
+    foreach ($entry1 in $matrix1) {
+        foreach ($entry2 in $matrix2) {
+            $newEntry = @{
+                name = $entry1.name
+                parameters = CloneOrderedDictionary $entry1.parameters
+            }
+            foreach($param in $entry2.parameters.GetEnumerator()) {
+                if (-not $newEntry.Contains($param.Name)) {
+                    $newEntry.parameters[$param.Name] = $param.Value
+                } else {
+                    Write-Warning "Skipping duplicate parameter `"$($param.Name)`" when combining matrix."
+                }
+            }
+
+            # The maximum allowed matrix name length is 100 characters
+            $entry2.name = $entry2.name.TrimStart("job_")
+            $newEntry.name = $newEntry.name, $entry2.name -join "_"
+            if ($newEntry.name.Length -gt 100) {
+                $newEntry.name = $newEntry.name[0..99] -join ""
+            }
+
+            $combined += $newEntry
+        }
+    }
+
+    return $combined
 }
 
 function MatrixElementMatch([System.Collections.Specialized.OrderedDictionary]$source, [System.Collections.Specialized.OrderedDictionary]$target)
@@ -178,21 +261,6 @@ function MatrixElementMatch([System.Collections.Specialized.OrderedDictionary]$s
     }
 
     return $true
-}
-
-function ConvertToMatrixArrayFormat([System.Collections.Specialized.OrderedDictionary]$matrix)
-{
-    $converted = [Ordered]@{}
-
-    foreach ($key in $matrix.Keys) {
-        if ($matrix[$key] -isnot [Array]) {
-            $converted[$key] = ,$matrix[$key]
-        } else {
-            $converted[$key] = $matrix[$key]
-        }
-    }
-
-    return $converted
 }
 
 function CloneOrderedDictionary([System.Collections.Specialized.OrderedDictionary]$dictionary) {
@@ -219,13 +287,32 @@ function SerializePipelineMatrix([Array]$matrix)
     }
 }
 
-function GenerateSparseMatrix([System.Collections.Specialized.OrderedDictionary]$parameters, [Hashtable]$displayNamesLookup)
-{
+function GenerateSparseMatrix(
+    [System.Collections.Specialized.OrderedDictionary]$parameters,
+    [Hashtable]$displayNamesLookup
+) {
+    $parameters, $allOfParameters = ProcessAllOf $parameters $true
     [Array]$dimensions = GetMatrixDimensions $parameters
-    $size = ($dimensions | Measure-Object -Maximum).Maximum
-
     [Array]$matrix = GenerateFullMatrix $parameters $displayNamesLookup
+
     $sparseMatrix = @()
+    $indexes = GetSparseMatrixIndexes $dimensions
+    foreach ($idx in $indexes) {
+        $sparseMatrix += GetNdMatrixElement $idx $matrix $dimensions
+    }
+
+    if ($allOfParameters) {
+        [Array]$allOfMatrix = GenerateFullMatrix $allOfParameters $displayNamesLookup
+        return CombineMatrices $allOfMatrix $sparseMatrix
+    }
+
+    return $sparseMatrix
+}
+
+function GetSparseMatrixIndexes([Array]$dimensions)
+{
+    $size = ($dimensions | Measure-Object -Maximum).Maximum
+    $indexes = @()
 
     # With full matrix, retrieve items by doing diagonal lookups across the matrix N times.
     # For example, given a matrix with dimensions 3, 2, 2:
@@ -238,25 +325,28 @@ function GenerateSparseMatrix([System.Collections.Specialized.OrderedDictionary]
         for ($j = 0; $j -lt $dimensions.Length; $j++) {
             $idx += $i % $dimensions[$j]
         }
-        $sparseMatrix += GetNdMatrixElement $idx $matrix $dimensions
+        $indexes += ,$idx
     }
 
-    return $sparseMatrix
+    return $indexes
 }
 
-function GenerateFullMatrix([System.Collections.Specialized.OrderedDictionary] $parameters, [Hashtable]$displayNamesLookup = @{})
-{
+function GenerateFullMatrix(
+    [System.Collections.Specialized.OrderedDictionary] $parameters,
+    [Hashtable]$displayNamesLookup = @{}
+) {
     # Handle when the config does not have a matrix specified (e.g. only the include field is specified)
     if ($parameters.Count -eq 0) {
         return @()
     }
 
+    $parameters, $_ = ProcessAllOf $parameters $false
     $parameterArray = $parameters.GetEnumerator() | ForEach-Object { $_ }
 
     $matrix = [System.Collections.ArrayList]::new()
     InitializeMatrix $parameterArray $displayNamesLookup $matrix
 
-    return $matrix.ToArray()
+    return $matrix
 }
 
 function CreateMatrixEntry([System.Collections.Specialized.OrderedDictionary]$permutation, [Hashtable]$displayNamesLookup = @{})
@@ -308,19 +398,20 @@ function InitializeMatrix
         [System.Collections.ArrayList]$permutations,
         $permutation = [Ordered]@{}
     )
+    $head, $tail = $parameters
 
-    if (-not $parameters) {
+    if (-not $head) {
         $entry = CreateMatrixEntry $permutation $displayNamesLookup
         $permutations.Add($entry) | Out-Null
         return
     }
 
-    $head, $tail = $parameters
-    foreach ($value in $head.value) {
-        $newPermutation = CloneOrderedDictionary($permutation)
+    # This behavior implicitly treats non-array values as single elements
+    foreach ($value in $head.Value) {
+        $newPermutation = CloneOrderedDictionary $permutation
         if ($value -is [PSCustomObject]) {
             foreach ($nestedParameter in $value.PSObject.Properties) {
-                $nestedPermutation = CloneOrderedDictionary($newPermutation)
+                $nestedPermutation = CloneOrderedDictionary $newPermutation
                 $nestedPermutation[$nestedParameter.Name] = $nestedParameter.Value
                 InitializeMatrix $tail $displayNamesLookup $permutations $nestedPermutation
             }
@@ -334,11 +425,11 @@ function InitializeMatrix
 function GetMatrixDimensions([System.Collections.Specialized.OrderedDictionary]$parameters)
 {
     $dimensions = @()
-    foreach ($val in $parameters.Values) {
-        if ($val -is [PSCustomObject]) {
-            $dimensions += ($val.PSObject.Properties | Measure-Object).Count
-        } elseif ($val -is [Array]) {
-            $dimensions += $val.Length
+    foreach ($param in $parameters.GetEnumerator()) {
+        if ($param.Value -is [PSCustomObject]) {
+            $dimensions += ($param.Value.PSObject.Properties | Measure-Object).Count
+        } elseif ($param.Value -is [Array]) {
+            $dimensions += $param.Value.Length
         } else {
             $dimensions += 1
         }
