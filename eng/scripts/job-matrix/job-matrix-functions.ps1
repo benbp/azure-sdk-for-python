@@ -318,7 +318,7 @@ function GetSparseMatrixIndexes([Array]$dimensions)
         for ($j = 0; $j -lt $dimensions.Length; $j++) {
             $idx += $i % $dimensions[$j]
         }
-        $indexes += $idx
+        $indexes += ,$idx
     }
 
     return $indexes
