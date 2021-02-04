@@ -84,14 +84,20 @@ parameters:
 jobs:
   - ${{ each cloudConfig in parameters.CloudConfigurations }}:
     - job: ${{ parameters.JobName }}
-      variables:
-        skipComponentGovernanceDetection: true
 
       timeoutInMinutes: ${{ parameters.TestTimeoutInMinutes }}
+
       strategy:
         maxParallel: ${{ parameters.MaxParallel }}
         matrix: ${{ parameters.Matrix }}
       continueOnError: false
+
+      variables:
+        - template: ../variables/globals.yml
+        - name: ArmTemplateParameters
+          value: '@{}'
+        - name: BuildTargetingStringValue
+          value: $[ coalesce(variables.BuildTargetingString, ${{ parameters.BuildTargetingString }}) ]
 
       pool:
         name: $(Pool)
