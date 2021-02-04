@@ -36,15 +36,39 @@ Describe "Platform Matrix allOf" -Tag "allof" {
 
     It "Should combine full matrix with allOf" {
         $matrix = GenerateMatrix $config "all"
+        $matrix.Length | Should -Be 24
     }
 
     It "Should combine sparse matrix with allOf" {
         $matrix = GenerateMatrix $config "sparse"
+        $matrix.Length | Should -Be 12
+    }
+
+    It "Should combine with multiple allOf fields" {
+        $matrixJson = @'
+{
+    "matrix": {
+        "testField1": [ 1, 2 ],
+        "testField2": [ 1, 2 ],
+        "$allOf": {
+            "testField3": [ 31, 32 ],
+            "testField4": [ 41, 42 ]
+        }
+    }
+}
+'@
+        $config = GetMatrixConfigFromJson $matrixJson
+
+        $matrix = GenerateMatrix $config "all"
+        $matrix.Length | Should -Be 16
+
+        $matrix = GenerateMatrix $config "sparse"
+        $matrix.Length | Should -Be 8
     }
 }
 
 Describe "Platform Matrix Import" -Tag "import" {
-    It "Should generate a full matrix with an imported sparse matrix" {
+    It "Should generate an allOf matrix with an imported sparse matrix" {
         $matrixJson = @'
 {
     "import": {
@@ -66,9 +90,9 @@ Describe "Platform Matrix Import" -Tag "import" {
         $matrix[0].name | Should -Be test1_foo1_bar1
         $matrix[0].parameters.testField | Should -Be "test1"
         $matrix[0].parameters.Foo | Should -Be "foo1"
-        $matrix[2].name | Should -Be test1_includedBaz
+        $matrix[2].name | Should -Be test1_importedBaz
         $matrix[2].parameters.testField | Should -Be "test1"
-        $matrix[2].parameters.Baz | Should -Be "includedBaz"
+        $matrix[2].parameters.Baz | Should -Be "importedBaz"
         $matrix[4].name | Should -Be test2_foo2_bar2
         $matrix[4].parameters.testField | Should -Be "test2"
         $matrix[4].parameters.Foo | Should -Be "foo2"
@@ -96,18 +120,42 @@ Describe "Platform Matrix Import" -Tag "import" {
         $matrix[0].parameters.testField1 | Should -Be "test11"
         $matrix[0].parameters.testField2 | Should -Be "test21"
         $matrix[0].parameters.Foo | Should -Be "foo1"
-        $matrix[2].name | Should -Be test11_test21_includedBaz
+        $matrix[2].name | Should -Be test11_test21_importedBaz
         $matrix[2].parameters.testField1 | Should -Be "test11"
         $matrix[2].parameters.testField2 | Should -Be "test21"
-        $matrix[2].parameters.Baz | Should -Be "includedBaz"
+        $matrix[2].parameters.Baz | Should -Be "importedBaz"
         $matrix[4].name | Should -Be test12_test22_foo2_bar2
         $matrix[4].parameters.testField1 | Should -Be "test12"
         $matrix[4].parameters.testField2 | Should -Be "test22"
         $matrix[4].parameters.Foo | Should -Be "foo2"
     }
 
-    It "Should " {
-        $matrixConfigForObject = @'
+    It "Should import a sparse matrix with includes only" {
+        $matrixJson = @'
+{
+    "import": {
+        "path": "./test-import-matrix.json",
+        "combineWith": "include"
+    },
+    "matrix": {
+        "testField": [ "test1" ]
+    },
+    "include": [
+      {
+        "testImportIncludeName": [ "testInclude1", "testInclude2" ]
+      }
+    ]
+}
+'@
+
+        $importConfig = GetMatrixConfigFromJson $matrixJson
+        $matrix = GenerateMatrix $importConfig "sparse"
+
+        $matrix.Length | Should -Be 7
+    }
+
+    It "Should import a sparse matrix with all and exclude" {
+        $matrixJson = @'
 {
     "import": {
         "path": "./test-import-matrix.json",
@@ -118,20 +166,24 @@ Describe "Platform Matrix Import" -Tag "import" {
     },
     "include": [
       {
-        "testImportInclude": {
-            "testImportIncludeName": { "testValue1": "1", "testValue2": "2" }
-        }
+        "testImportIncludeName": [ "testInclude1", "testInclude2" ]
       }
     ],
     "exclude": [
       {
-        "Foo": 1,
-        "Bar": [ "a", "b" ]
+        "testField": "test1"
+      },
+      {
+        "testField": "test2",
+        "Baz": "importedBaz"
       }
     ]
 }
 '@
 
-        $importConfig = GetMatrixConfigFromJson $matrixConfigForObject
+        $importConfig = GetMatrixConfigFromJson $matrixJson
+        $matrix = GenerateMatrix $importConfig "sparse"
+
+        $matrix.Length | Should -Be 8
     }
 }

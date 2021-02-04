@@ -213,6 +213,12 @@ function ProcessImport([PSCustomObject]$import, [Array]$matrix, [String]$selecti
 function CombineMatrices([Array]$matrix1, [Array]$matrix2)
 {
     $combined = @()
+    if (-not $matrix1) {
+        return $matrix2
+    }
+    if (-not $matrix2) {
+        return $matrix1
+    }
 
     foreach ($entry1 in $matrix1) {
         foreach ($entry2 in $matrix2) {
@@ -229,6 +235,7 @@ function CombineMatrices([Array]$matrix1, [Array]$matrix2)
             }
 
             # The maximum allowed matrix name length is 100 characters
+            $entry2.name = $entry2.name.TrimStart("job_")
             $newEntry.name = $newEntry.name, $entry2.name -join "_"
             if ($newEntry.name.Length -gt 100) {
                 $newEntry.name = $newEntry.name[0..99] -join ""

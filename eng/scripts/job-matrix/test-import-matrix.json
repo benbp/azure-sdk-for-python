@@ -5,7 +5,7 @@
   },
   "include": [
     {
-      "Baz": "includedBaz"
+      "Baz": "importedBaz"
     }
   ]
 }
