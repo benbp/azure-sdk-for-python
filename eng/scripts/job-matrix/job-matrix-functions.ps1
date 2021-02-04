@@ -64,29 +64,21 @@ function ProcessAllOf([System.Collections.Specialized.OrderedDictionary]$paramet
         return $parameters, $null
     }
 
-    # Iterate instead of doing a key lookup in order to preserve ordering
-    $processedParameters = [ordered]@{}
-    $i = 0
-    $allOfDimensions = @()
-    $startsAt = $null
-    foreach ($param in $parameters.GetEnumerator()) {
-        # If the selection is all, then the allOf field is redundant,
-        # so copy its parameters to the top level
-        if ($param.Name -eq $ALL_OF_KEYWORD) {
-            $startsAt = $i
-            foreach ($allParam in $param.Value) {
-                $allOfDimensions += $i
-                $processedParameters[$allParam.Name] = $allParam.Value
-                $i++
-            }
-        } else {
-            $processedParameters[$param.Name] = $param.Value
+    # If the selection is all, then the allOf field is redundant,
+    # so copy its parameters to the top level
+    if (-not $sparse) {
+        foreach ($param in $parameters[$ALL_OF_KEYWORD].Value) {
+            $parameters[$param.Name] = $param.Value
         }
-        $i++
     }
 
+    $allOf = [ordered]@{}
+    foreach($param in $parameters[$ALL_OF_KEYWORD].PSObject.Properties) {
+        $allOf.Add($param.Name, $param.Value)
+    }
     $parameters.Remove($ALL_OF_KEYWORD)
-    return $processedParameters, $allOfDimensions, $startsAt
+
+    return $processedParameters, $allOf
 }
 
 function FilterMatrixDisplayName([array]$matrix, [string]$filter) {
@@ -216,35 +208,41 @@ function ProcessImport([PSCustomObject]$import, [Array]$matrix)
         return $matrix
     }
 
-    $crossProductImported = @()
     $matrixConfig = GetMatrixConfigFromJson (Get-Content $import.path)
     $importedMatrix = GenerateMatrix $matrixConfig $import.selection
 
-    foreach ($entry in $matrix) {
-        foreach ($importedEntry in $importedMatrix) {
+    return CombineMatrices $matrix $importedMatrix
+}
+
+function CombineMatrices([Array]$matrix1, [Array]$matrix2)
+{
+    $combined = @()
+
+    foreach ($entry1 in $matrix1) {
+        foreach ($entry2 in $matrix2) {
             $newEntry = @{
-                name = $entry.name
-                parameters = CloneOrderedDictionary($entry.parameters)
+                name = $entry1.name
+                parameters = CloneOrderedDictionary($entry1.parameters)
             }
-            foreach($param in $importedEntry.parameters.GetEnumerator()) {
+            foreach($param in $entry2.parameters.GetEnumerator()) {
                 if (-not $newEntry.Contains($param.Name)) {
                     $newEntry.parameters[$param.Name] = $param.Value
                 } else {
-                    Write-Warning "Skipping duplicate parameter `"$($param.Name)`" from imported matrix."
+                    Write-Warning "Skipping duplicate parameter `"$($param.Name)`" when combining matrix."
                 }
             }
 
             # The maximum allowed matrix name length is 100 characters
-            $newEntry.name = $newEntry.name, $importedEntry.name -join "_"
+            $newEntry.name = $newEntry.name, $entry2.name -join "_"
             if ($newEntry.name.Length -gt 100) {
                 $newEntry.name = $newEntry.name[0..99] -join ""
             }
 
-            $crossProductImported += $newEntry
+            $combined += $newEntry
         }
     }
 
-    return $crossProductImported
+    return $combined
 }
 
 function MatrixElementMatch([System.Collections.Specialized.OrderedDictionary]$source, [System.Collections.Specialized.OrderedDictionary]$target)
@@ -292,19 +290,24 @@ function GenerateSparseMatrix(
 ) {
     [Array]$dimensions = GetMatrixDimensions $parameters
 
-    $parameters, $allOfDimensions, $startsAt = ProcessAllOf $parameters $true
+    $parameters, $allOfParameters = ProcessAllOf $parameters $true
     [Array]$matrix = GenerateFullMatrix $parameters $displayNamesLookup
 
     $sparseMatrix = @()
-    $indexes = GetSparseMatrixIndexes $dimensions $allOfDimensions $startsAt
+    $indexes = GetSparseMatrixIndexes $dimensions
     foreach ($idx in $indexes) {
         $sparseMatrix += GetNdMatrixElement $idx $matrix $dimensions
+    }
+
+    if ($allOfParameters) {
+        [Array]$allOfMatrix = GenerateFullMatrix $allOfParameters $displayNamesLookup
+        return CombineMatrices $allOfMatrix $sparseMatrix
     }
 
     return $sparseMatrix
 }
 
-function GetSparseMatrixIndexes([Array]$dimensions, [Array]$allOfDimensions, [Int]$startsAt)
+function GetSparseMatrixIndexes([Array]$dimensions)
 {
     $size = ($dimensions | Measure-Object -Maximum).Maximum
     $indexes = @()
@@ -315,24 +318,12 @@ function GetSparseMatrixIndexes([Array]$dimensions, [Array]$allOfDimensions, [In
     # 1, 1, 1
     # 2, 2, 2
     # 3, 0, 0 <- 3, 3, 3 wraps to 3, 0, 0 given the dimensions
-    if (-not $allOfDimensions) {
-        for ($i = 0; $i -lt $size; $i++) {
-            $idx = @()
-            for ($j = 0; $j -lt $dimensions.Length; $j++) {
-                $idx += $i % $dimensions[$j]
-            }
-            $indexes += $idx
+    for ($i = 0; $i -lt $size; $i++) {
+        $idx = @()
+        for ($j = 0; $j -lt $dimensions.Length; $j++) {
+            $idx += $i % $dimensions[$j]
         }
-    } else {
-        $allOfPermutations = [System.Collections.ArrayList]::new()
-        GetPermutations $allOfDimensions $allOfPermutations
-        for ($i = 0; $i -lt $size; $i++) {
-            $idx = @()
-            for ($j = 0; $j -lt $startsAt; $j++) {
-                $idx += $i % $dimensions[$j]
-            }
-            $indexes += $idx
-        }
+        $indexes += $idx
     }
 
     return $indexes
