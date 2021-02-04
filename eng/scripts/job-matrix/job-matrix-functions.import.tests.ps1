@@ -4,25 +4,46 @@ BeforeAll {
     . ./job-matrix-functions.ps1
 }
 
-Describe "Platform Matrix Import" -Tag "import" {
-    It "Should get matrix dimensions with an import" {
+Describe "Platform Matrix allOf" -Tag "allof" {
+    BeforeEach {
         $matrixJson = @'
 {
     "matrix": {
         "testField1": [ 1, 2 ],
         "testField2": [ 1, 2, 3 ],
-        "$IMPORT": {
-            "path": "./test-import-matrix.json",
-            "selection": "sparse"
+        "$allOf": {
+            "testField3": [ 1, 2, 3, 4 ],
         }
     }
 }
 '@
-        $importConfig = GetMatrixConfigFromJson $matrixJson
-        [Array]$dimensions = GetMatrixDimensions $importConfig.orderedMatrix
-        $dimensions | Should -Be @(2, 3)
+        $config = GetMatrixConfigFromJson $matrixJson
     }
 
+    It "Should process full matrix with allOf" {
+        $parameters, $_ = ProcessAllOf $config.orderedMatrix $false
+        $parameters.Count | Should -Be 3
+        $parameters["testField3"] | Should -Be 1,2,3,4
+    }
+
+    It "Should process sparse matrix with allOf" {
+        $parameters, $allOf = ProcessAllOf $config.orderedMatrix $true
+        $parameters.Count | Should -Be 2
+        $parameters.Contains("testField3") | Should -Be $false
+        $allOf.Count | Should -Be 1
+        $allOf["testField3"] | Should -Be 1,2,3,4
+    }
+
+    It "Should combine full matrix with allOf" {
+        $matrix = GenerateMatrix $config "all"
+    }
+
+    It "Should combine sparse matrix with allOf" {
+        $matrix = GenerateMatrix $config "sparse"
+    }
+}
+
+Describe "Platform Matrix Import" -Tag "import" {
     It "Should generate a full matrix with an imported sparse matrix" {
         $matrixJson = @'
 {

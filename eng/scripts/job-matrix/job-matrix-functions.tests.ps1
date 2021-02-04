@@ -440,7 +440,7 @@ Describe "Platform Matrix Post Transformation" -Tag "transform" {
 
     It "Should add matrix elements based on include elements" {
         $matrix = GenerateFullMatrix $config.orderedMatrix $config.displayNamesLookup
-        $withInclusion = ProcessIncludes $config $matrix
+        $withInclusion = ProcessIncludes $config $matrix "all"
         $withInclusion.Length | Should -Be 15
     }
 
